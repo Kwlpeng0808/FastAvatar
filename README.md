@@ -91,6 +91,25 @@ python scripts/inference_feedforward_full_guidance.py \
 
 # Using different LPIPS network
 python scripts/inference.py --sample_id 306 --lpips_net vgg
+
+# Provide a unified launcher to run all pipelines from one entrypoint(Apply a runtime patch to pycolmap SceneManager binary loaders on Windows.[ATTENTION!]This compatibility issue is Windows-specific.):
+# --mode selects the pipeline:
+# full_guidance
+# no_guidance
+# train_decoder
+# train_encoder
+python launcher.py --mode <mode> -- <target_script_args>
+# Examples:
+# FLAME-guided inference
+python launcher.py --mode full_guidance -- \
+  --sample_id 306 --max_epochs 401 --mlp_lr 2e-4 --w_lr 1e-4 --scale_reg 0.01 --pos_reg 0.001
+
+# Single-image feedforward inference
+python launcher.py --mode no_guidance -- \
+  --image /path/to/image.jpg \
+  --encoder_checkpoint pretrained_weights/encoder_neutral_flame.pth \
+  --decoder_checkpoint pretrained_weights/decoder_neutral_flame.pth \
+  --dino_checkpoint pretrained_weights/dino_encoder.pth
 ``` 
 
 All experiment outputs are organized under the `results/` folder:
