@@ -21,12 +21,13 @@ pandas>=1
 lpips
 onnxruntime
 plyfile
-mediapipe==0.10.15
+mediapipe==0.10.14
 # External GitHub repos
-git+https://github.com/rmbrualla/pycolmap@cc7ea4b7301720ac29287dbe450952511b32125e
-git+https://github.com/rahul-goel/fused-ssim@328dc9836f513d00c4b5bc38fe30478b4435cbb5
-git+https://github.com/harry7557558/fused-bilagrid@90f9788e57d3545e3a033c1038bb9986549632fe
-
+# git+https://github.com/rmbrualla/pycolmap@cc7ea4b7301720ac29287dbe450952511b32125e
+D:\Repo\pycolmap-master
+# git+https://github.com/rahul-goel/fused-ssim@328dc9836f513d00c4b5bc38fe30478b4435cbb5
+# git+https://github.com/harry7557558/fused-bilagrid@90f9788e57d3545e3a033c1038bb9986549632fe
+# D:\Repo\fused-bilagrid
 
 # (optional) nerfacc for torch rasterization
 # git+https://github.com/nerfstudio-project/nerfacc
