@@ -76,33 +76,37 @@ python scripts/inference_feedforward_no_guidance.py \
 
 ### Inference with FLAME guidance (nersemble-style)
 
-```python
-# Basic Inference/test-time optimization with default parameters
+```bash
+# Basic test-time optimization with default parameters
 python scripts/inference_feedforward_full_guidance.py
 
 # Custom learning rates and regularization
 python scripts/inference_feedforward_full_guidance.py \
-    --sample_id 306 \
-    --max_epochs 401 \
-    --mlp_lr 2e-4 \
-    --w_lr 1e-4 \
-    --scale_reg 0.01 \
-    --pos_reg 0.001
+  --sample_id 306 \
+  --max_epochs 401 \
+  --mlp_lr 2e-4 \
+  --w_lr 1e-4 \
+  --scale_reg 0.01 \
+  --pos_reg 0.001
+```
 
-# Using different LPIPS network
-python scripts/inference.py --sample_id 306 --lpips_net vgg
+### Unified Launcher (Recommended)
 
-# Provide a unified launcher to run all pipelines from one entrypoint(Apply a runtime patch to pycolmap SceneManager binary loaders on Windows.[ATTENTION!]This compatibility issue is Windows-specific.):
-# --mode selects the pipeline:
-# full_guidance
-# no_guidance
-# train_decoder
-# train_encoder
+Use launcher as a single entrypoint for inference and training.
+On Windows, launcher automatically checks/applies compatibility fixes for pycolmap and gsplat.
+
+```bash
+# Generic form
 python launcher.py --mode <mode> -- <target_script_args>
-# Examples:
+
 # FLAME-guided inference
 python launcher.py --mode full_guidance -- \
-  --sample_id 306 --max_epochs 401 --mlp_lr 2e-4 --w_lr 1e-4 --scale_reg 0.01 --pos_reg 0.001
+  --sample_id 306 \
+  --max_epochs 401 \
+  --mlp_lr 2e-4 \
+  --w_lr 1e-4 \
+  --scale_reg 0.01 \
+  --pos_reg 0.001
 
 # Single-image feedforward inference
 python launcher.py --mode no_guidance -- \
@@ -110,7 +114,7 @@ python launcher.py --mode no_guidance -- \
   --encoder_checkpoint pretrained_weights/encoder_neutral_flame.pth \
   --decoder_checkpoint pretrained_weights/decoder_neutral_flame.pth \
   --dino_checkpoint pretrained_weights/dino_encoder.pth
-``` 
+```
 
 All experiment outputs are organized under the `results/` folder:
 
@@ -143,6 +147,10 @@ You can use [Supersplat](https://superspl.at/editor) for interactive visualizati
 Train the decoder on multiple subjects with COLMAP reconstructions:
 
 ```bash
+# Decoder training
+python launcher.py --mode train_decoder -- \
+  --data_root /path/to/multi_subject_data
+
 # Basic decoder training
 python scripts/train_decoder.py --data_root /path/to/multi_subject_data
 
@@ -168,6 +176,11 @@ python scripts/train_decoder.py \
 Train the encoder to predict W vectors from face embeddings:
 
 ```bash
+# Encoder training
+python launcher.py --mode train_encoder -- \
+  --data_root /path/to/multi_subject_data \
+  --decoder_load_path /path/to/decoder.pth
+  
 # Basic encoder training (requires pretrained decoder)
 python scripts/train_encoder.py \
     --data_root /path/to/multi_subject_data \

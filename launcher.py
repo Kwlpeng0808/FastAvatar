@@ -3,13 +3,15 @@ Unified launcher for FastAvatar pipelines.
 
 Why this file exists:
 1) Provide a single team entrypoint for running all pipelines.
-2) Apply a Windows-only runtime monkey patch for pycolmap binary parsing.
-3) Avoid editing site-packages and keep business scripts clean.
+2) Apply Windows compatibility patches (pycolmap + gsplat) automatically.
+3) Keep business scripts clean and avoid manual environment edits.
 """
 
 import argparse
 import importlib
+import importlib.util
 import platform
+import re
 import struct
 import sys
 from collections import OrderedDict
@@ -17,6 +19,25 @@ from pathlib import Path
 import array
 
 import numpy as np
+
+
+def launcher_log(message, verbose=True):
+    """Print launcher-prefixed logs when verbose mode is enabled."""
+    if verbose:
+        print(f"[launcher] {message}")
+
+
+def is_windows():
+    """Return True only on Windows platforms."""
+    return platform.system().lower() == "windows"
+
+
+def should_apply_windows_patch(patch_name, verbose=True):
+    """Shared gate for all Windows-only compatibility patches."""
+    if not is_windows():
+        launcher_log(f"non-windows platform, skip {patch_name} patch", verbose)
+        return False
+    return True
 
 
 def apply_pycolmap_windows_patch(verbose=True):
@@ -28,23 +49,18 @@ def apply_pycolmap_windows_patch(verbose=True):
     - Does NOT modify any files in site-packages.
     - Patch is applied only once per process.
     """
-    # [ATTENTION!]This compatibility issue is Windows-specific.
-    if platform.system().lower() != "windows":
-        if verbose:
-            print("[launcher] non-windows platform, skip pycolmap patch")
+    if not should_apply_windows_patch("pycolmap", verbose):
         return
 
     try:
         import pycolmap.scene_manager as sm
     except Exception as e:
-        if verbose:
-            print(f"[launcher] pycolmap import failed, skip patch: {e}")
+        launcher_log(f"pycolmap import failed, skip patch: {e}", verbose)
         return
 
     # Guard against double patching.
     if getattr(sm.SceneManager, "_fastavatar_patched", False):
-        if verbose:
-            print("[launcher] pycolmap already patched")
+        launcher_log("pycolmap already patched", verbose)
         return
 
     def _load_cameras_bin_fixed(self, input_file):
@@ -139,8 +155,64 @@ def apply_pycolmap_windows_patch(verbose=True):
     sm.SceneManager._load_points3D_bin = _load_points3D_bin_fixed
     sm.SceneManager._fastavatar_patched = True
 
-    if verbose:
-        print("[launcher] pycolmap Windows patch applied")
+    launcher_log("pycolmap Windows patch applied", verbose)
+
+
+def apply_gsplat_windows_patch(verbose=True):
+    """
+    Auto-fix gsplat Windows compile flags in site-packages when needed.
+
+    Why:
+    - Some gsplat versions pass GCC-style '-Wno-attributes' into MSVC,
+      which causes: cl D8021 invalid numeric argument '/Wno-attributes'.
+
+    Behavior:
+    - Windows only.
+    - If target line already patched, no-op.
+    - If gsplat is not installed, safely skip.
+    """
+    if not should_apply_windows_patch("gsplat", verbose):
+        return
+
+    spec = importlib.util.find_spec("gsplat.cuda._backend")
+    if spec is None or not spec.origin:
+        launcher_log("gsplat not found, skip patch", verbose)
+        return
+
+    backend_file = Path(spec.origin)
+    if not backend_file.exists():
+        launcher_log(f"gsplat backend file not found: {backend_file}", verbose)
+        return
+
+    try:
+        original = backend_file.read_text(encoding="utf-8")
+    except Exception as e:
+        launcher_log(f"failed to read gsplat backend, skip patch: {e}", verbose)
+        return
+
+    # Already patched by launcher or user.
+    if "if os.name == \"nt\" else [opt_level, \"-Wno-attributes\"]" in original:
+        launcher_log("gsplat already patched", verbose)
+        return
+
+    patched = re.sub(
+        r"extra_cflags\s*=\s*\[\s*opt_level\s*,\s*\"-Wno-attributes\"\s*\]",
+        'extra_cflags = [opt_level] if os.name == "nt" else [opt_level, "-Wno-attributes"]',
+        original,
+        count=1,
+    )
+
+    if patched == original:
+        launcher_log("gsplat patch pattern not found, skip patch", verbose)
+        return
+
+    try:
+        backend_file.write_text(patched, encoding="utf-8")
+    except Exception as e:
+        launcher_log(f"failed to write gsplat backend patch: {e}", verbose)
+        return
+
+    launcher_log(f"gsplat Windows patch applied: {backend_file}", verbose)
 
 
 def build_parser():
@@ -189,7 +261,7 @@ def resolve_target(mode):
 
 def mode_needs_patch(mode):
     """
-    Decide whether a mode needs pycolmap patch.
+    Decide whether a mode needs the pycolmap patch.
 
     Modes that parse COLMAP binaries through dataset Parser need patch.
     no_guidance generally uses single-image path without COLMAP binary parsing.
@@ -197,12 +269,29 @@ def mode_needs_patch(mode):
     return mode in {"full_guidance", "train_decoder", "train_encoder"}
 
 
+def apply_compatibility_patches(mode, no_patch=False, verbose=True):
+    """
+    Apply runtime compatibility patches in a stable order.
+
+    Order:
+    1) gsplat patch (site-packages text fix, needed before first JIT compile)
+    2) pycolmap patch (runtime monkey patch, mode-dependent)
+    """
+    apply_gsplat_windows_patch(verbose=verbose)
+
+    if mode_needs_patch(mode) and not no_patch:
+        apply_pycolmap_windows_patch(verbose=verbose)
+        return
+
+    launcher_log("pycolmap patch skipped", verbose)
+
+
 def main():
     """
     Launcher execution flow:
     1) Parse launcher args
     2) Add scripts directory to sys.path
-    3) Conditionally apply pycolmap patch
+    3) Apply compatibility patches
     4) Import target module by mode
     5) Rewrite sys.argv for target argparse
     6) Call target main()
@@ -216,11 +305,8 @@ def main():
     # Ensure target modules under scripts can be imported.
     sys.path.insert(0, str(scripts_dir))
 
-    # Apply compatibility patch only when needed.
-    if mode_needs_patch(args.mode) and not args.no_patch:
-        apply_pycolmap_windows_patch(verbose=True)
-    else:
-        print("[launcher] patch skipped")
+    # Keep all compatibility handling in one place.
+    apply_compatibility_patches(args.mode, no_patch=args.no_patch, verbose=True)
 
     module_name = resolve_target(args.mode)
     module = importlib.import_module(module_name)
@@ -231,7 +317,7 @@ def main():
         passthrough = passthrough[1:]
 
     sys.argv = [module_name + ".py"] + passthrough
-    print(f"[launcher] dispatch -> {module_name} {' '.join(passthrough)}")
+    launcher_log(f"dispatch -> {module_name} {' '.join(passthrough)}", verbose=True)
 
     if not hasattr(module, "main"):
         raise RuntimeError(f"{module_name}.main not found")
